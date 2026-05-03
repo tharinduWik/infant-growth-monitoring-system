@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, Image, Pressable,
-  ActivityIndicator, Alert, ScrollView,
+  ActivityIndicator, Alert, ScrollView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -58,19 +58,46 @@ export default function ProfileScreen() {
       .then(({ data }) => { if (data) setInfant(data as Infant); });
   }, [user]);
 
-  const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out', style: 'destructive',
-        onPress: async () => {
-          setSigningOut(true);
-          try { await signOut(); router.replace('/(auth)/sign-in'); }
-          catch { Alert.alert('Error', 'Failed to sign out. Please try again.'); }
-          finally { setSigningOut(false); }
-        },
-      },
-    ]);
+  const handleSignOut = async () => {
+    // Platform-specific confirmation
+    const showConfirmation = () => {
+      return new Promise<boolean>((resolve) => {
+        if (Platform.OS === 'web') {
+          // Web: use window.confirm
+          const confirmed = typeof window !== 'undefined' && window.confirm('Are you sure you want to sign out?');
+          resolve(confirmed);
+        } else {
+          // Mobile (iOS/Android): use Alert.alert
+          Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Sign Out', style: 'destructive', onPress: () => resolve(true) },
+          ]);
+        }
+      });
+    };
+
+    const confirmed = await showConfirmation();
+    if (!confirmed) return;
+
+    setSigningOut(true);
+    try { 
+      await signOut(); 
+      // Add a small delay to ensure session is cleared before navigation
+      await new Promise(resolve => setTimeout(resolve, 500));
+      router.replace('/(auth)/sign-in'); 
+    }
+    catch (error: any) { 
+      console.error('[signOut] Error:', error);
+      const errorMsg = error?.message || 'Failed to sign out. Please try again.';
+      if (Platform.OS === 'web') {
+        window.alert(errorMsg);
+      } else {
+        Alert.alert('Error', errorMsg);
+      }
+    }
+    finally { 
+      setSigningOut(false); 
+    }
   };
 
   if (!user || !profile) {
