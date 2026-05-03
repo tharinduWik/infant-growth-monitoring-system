@@ -23,7 +23,12 @@ import FeedbackModal from '@/components/FeedbackModal';
 const normalizeBaseUrl = (value?: string) => {
   const trimmed = (value || '').trim().replace(/\/+$/, '');
   if (!trimmed) {
-    return 'http://localhost:8000';
+    // Web: use dynamic hostname on port 9000
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      return `http://${window.location.hostname}:9000`;
+    }
+    // Native/default: use localhost:9000
+    return 'http://127.0.0.1:9000';
   }
 
   return /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
@@ -498,6 +503,13 @@ export default function SmartAnalysisScreen() {
       if (!res.ok) throw new Error(json?.detail || `Audio request failed (${res.status})`);
 
       console.log('✅ Audio upload successful:', json);
+      
+      // Ensure debug_info is included
+      if (json && !json.debug_info) {
+        console.warn('⚠️ Audio response missing debug_info, adding empty object');
+        json.debug_info = {};
+      }
+      
       return json;
     } catch (error: any) {
       if (error?.name === 'AbortError') {
@@ -619,7 +631,7 @@ export default function SmartAnalysisScreen() {
 
       const recommendations = getRecommendations(fusionJson.predicted_cry_reason, context);
 
-      setAnalysisResult({
+      const resultData = {
         ...fusionJson,
         recommendations,
         audioPrediction,
@@ -628,7 +640,18 @@ export default function SmartAnalysisScreen() {
         imageConfidence,
         audioModelInputs: audioRes?.debug_info || {},
         imageModelInputs: faceRes?.features || {},
+      };
+
+      console.log('📊 Analysis Result:', {
+        predictionResult: fusionJson.predicted_cry_reason,
+        audioConfidence,
+        imageConfidence,
+        fusionConfidence: fusionJson.confidence,
+        audioModelInputsKeys: Object.keys(resultData.audioModelInputs),
+        imageModelInputsKeys: Object.keys(resultData.imageModelInputs),
       });
+
+      setAnalysisResult(resultData);
       setCurrentStep('result');
 
     } catch (error: any) {
@@ -681,7 +704,7 @@ export default function SmartAnalysisScreen() {
     switch (currentStep) {
       case 'record': return 'Record Cry';
       case 'capture': return 'Capture Face';
-      case 'context': return 'Add Context';
+      case 'context': return 'Baby Care Info';
       case 'result': return 'Analysis Result';
     }
   };
@@ -891,7 +914,7 @@ export default function SmartAnalysisScreen() {
         {currentStep === 'context' && (
           <View style={[styles.stepCard, { backgroundColor: cardBackground, shadowColor }]}>
             <ThemedText style={[styles.stepDescription, { color: secondaryText }]}>
-              Add context for better accuracy (required)
+              Share a few care details to improve the result
             </ThemedText>
 
             <View style={styles.inputContainer}>
@@ -1156,15 +1179,21 @@ export default function SmartAnalysisScreen() {
             userRating: rating,
             userComment: comment,
           };
+          
+          console.log('📤 Submitting feedback with audioModelInputs:', body.audioModelInputs);
+          
           const res = await fetch(FEEDBACK_API, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(body),
           });
+          
           if (!res.ok) {
             const err = await res.json().catch(() => null);
             throw new Error(err?.detail || 'Failed to submit feedback');
           }
+          
+          console.log('✅ Feedback submitted successfully');
         }}
       />
     </ScrollView>

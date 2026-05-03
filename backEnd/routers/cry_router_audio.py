@@ -4,9 +4,7 @@ import numpy as np
 import uuid
 import librosa
 import os
-import subprocess
-import traceback
-import noisereduce as nr
+import noisereduce as nr  # <--- NEW IMPORT
 
 router = APIRouter()
 
@@ -36,51 +34,16 @@ except Exception as e:
     print(f"❌ [CryRouter] Error loading models. Check file names! Error: {e}")
     models = None
 
-# Explicit path to the bundled ffmpeg.exe in backEnd/
-FFMPEG_EXE = os.path.abspath(os.path.join(current_dir, '..', 'ffmpeg.exe'))
-print(f"✅ [CryRouter] ffmpeg path: {FFMPEG_EXE}")
-
-# --- 3. FFMPEG CONVERSION (webm/ogg/m4a → wav for reliable librosa loading) ---
-def convert_to_wav(input_path: str) -> str | None:
-    wav_path = input_path.rsplit('.', 1)[0] + '_conv.wav'
-    ffmpeg_cmd = FFMPEG_EXE if os.path.exists(FFMPEG_EXE) else 'ffmpeg'
-    try:
-        result = subprocess.run(
-            [ffmpeg_cmd, '-y', '-i', input_path, '-ar', '22050', '-ac', '1', '-f', 'wav', wav_path],
-            capture_output=True, timeout=30
-        )
-        if result.returncode != 0:
-            print(f"ffmpeg conversion failed (code {result.returncode}): {result.stderr[-300:]}")
-            return None
-        print(f"✅ ffmpeg converted to wav: {wav_path}")
-        return wav_path
-    except Exception as e:
-        print(f"ffmpeg conversion error: {e}")
-        return None
-
-# --- 4. FEATURE EXTRACTOR (With Noise Cancellation) ---
+# --- 3. FEATURE EXTRACTOR (With Noise Cancellation) ---
 def extract_audio_features(audio_path):
-    converted_path = None
     try:
-        # Convert non-wav formats (webm, ogg, m4a) via ffmpeg for reliable decoding
-        ext = os.path.splitext(audio_path)[1].lower()
-        load_path = audio_path
-        if ext not in ('.wav', '.mp3', '.flac'):
-            converted_path = convert_to_wav(audio_path)
-            if converted_path and os.path.exists(converted_path):
-                load_path = converted_path
-                print(f"✅ Converted {ext} → wav for librosa")
-            else:
-                print(f"⚠️ ffmpeg conversion failed, trying direct load")
-
         # FIX 1: Force exactly 5.0 seconds
-        audio, sample_rate = librosa.load(load_path, sr=22050, duration=5.0)
+        audio, sample_rate = librosa.load(audio_path, sr=22050, duration=5.0)
         
-        # Log amplitude for diagnostics (no longer rejecting low-amplitude audio)
-        max_amplitude = float(np.max(np.abs(audio)))
-        print(f"🔊 Audio max amplitude: {max_amplitude:.6f}")
-        if max_amplitude < 0.001:
-            print("⚠️ WARNING: Audio is nearly silent — proceeding anyway")
+        # Check for silence
+        if np.max(np.abs(audio)) < 0.005:
+            print("⚠️ WARNING: Audio file is silent!")
+            return None
 
         # FIX 2: Apply Noise Cancellation
         try:
@@ -116,12 +79,7 @@ def extract_audio_features(audio_path):
         
     except Exception as e:
         print(f"❌ Feature Extraction Error: {e}")
-        traceback.print_exc()
         return None
-    finally:
-        if converted_path and os.path.exists(converted_path):
-            try: os.remove(converted_path)
-            except: pass
 
 # --- 4. PREDICTION ROUTE ---
 @router.post("/predict-cry")
@@ -130,11 +88,12 @@ async def predict_cry(file: UploadFile = File(...)):
     print(f"Content type: {file.content_type}")
     content = await file.read()
     print(f"File size bytes: {len(content)}")
+    await file.seek(0)
 
     if models is None:
         raise HTTPException(status_code=503, detail="Models not loaded properly")
 
-    # Map MIME type to file extension
+    # Save Temp File based on content type mapping
     content_types_map = {
         "audio/wav": "wav",
         "audio/webm": "webm",
@@ -143,20 +102,19 @@ async def predict_cry(file: UploadFile = File(...)):
         "audio/ogg": "ogg",
         "audio/webm;codecs=pcm": "webm",
         "audio/webm; codecs=opus": "webm",
-        "audio/webm;codecs=opus": "webm",
         "video/webm": "webm"
     }
-    content_type_clean = (file.content_type or "").split(";")[0].strip().lower()
-    ext_from_mime = content_types_map.get(file.content_type) or content_types_map.get(content_type_clean)
+    ext_from_mime = content_types_map.get(file.content_type)
     if ext_from_mime:
         extension = ext_from_mime
     else:
-        extension = file.filename.split(".")[-1] if "." in (file.filename or "") else "wav"
+        extension = file.filename.split(".")[-1] if "." in file.filename else "wav"
     temp_dir = os.path.join(current_dir, '..', 'tmp')
     os.makedirs(temp_dir, exist_ok=True)
     temp_filename = os.path.join(temp_dir, f"{uuid.uuid4()}.{extension}")
-
+    
     try:
+        content = await file.read()
         with open(temp_filename, "wb") as buffer:
             buffer.write(content)
         
@@ -193,10 +151,22 @@ async def predict_cry(file: UploadFile = File(...)):
                 final_label = "normal_cry"
                 confidence = float(is_hunger_prob[0])
 
+        # Extract debug info: feature statistics and model probabilities
+        debug_info = {
+            "feature_mean": float(np.mean(raw_features)),
+            "feature_std": float(np.std(raw_features)),
+            "feature_min": float(np.min(raw_features)),
+            "feature_max": float(np.max(raw_features)),
+            "num_features": int(raw_features.shape[1]),
+            "stage_1_probs": {"pain": float(is_pain_prob[1]), "not_pain": float(is_pain_prob[0])},
+            "stage_2_probs": {"hunger": float(is_hunger_prob[1]), "normal": float(is_hunger_prob[0])},
+        }
+
         return {
             "label": final_label,
             "confidence": confidence,
-            "message": f"Detected: {final_label.replace('_', ' ').title()}"
+            "message": f"Detected: {final_label.replace('_', ' ').title()}",
+            "debug_info": debug_info
         }
 
     except HTTPException as he:
