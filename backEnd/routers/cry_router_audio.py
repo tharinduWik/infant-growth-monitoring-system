@@ -151,10 +151,22 @@ async def predict_cry(file: UploadFile = File(...)):
                 final_label = "normal_cry"
                 confidence = float(is_hunger_prob[0])
 
+        # Extract debug info: feature statistics and model probabilities
+        debug_info = {
+            "feature_mean": float(np.mean(raw_features)),
+            "feature_std": float(np.std(raw_features)),
+            "feature_min": float(np.min(raw_features)),
+            "feature_max": float(np.max(raw_features)),
+            "num_features": int(raw_features.shape[1]),
+            "stage_1_probs": {"pain": float(is_pain_prob[1]), "not_pain": float(is_pain_prob[0])},
+            "stage_2_probs": {"hunger": float(is_hunger_prob[1]), "normal": float(is_hunger_prob[0])},
+        }
+
         return {
             "label": final_label,
             "confidence": confidence,
-            "message": f"Detected: {final_label.replace('_', ' ').title()}"
+            "message": f"Detected: {final_label.replace('_', ' ').title()}",
+            "debug_info": debug_info
         }
 
     except HTTPException as he:

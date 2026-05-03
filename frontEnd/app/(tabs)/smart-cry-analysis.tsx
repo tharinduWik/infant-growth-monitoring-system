@@ -16,7 +16,7 @@ import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 
 import { ThemedText } from '@/components/themed-text';
-import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
+import { Colors, Spacing, BorderRadius, Typography, Radius } from '@/constants/theme';
 import FeedbackModal from '@/components/FeedbackModal';
 
 // --- CONFIGURATION ---
@@ -682,11 +682,52 @@ export default function SmartAnalysisScreen() {
     return rec;
   };
 
+  const handleBack = () => {
+    if (currentStep === 'record') {
+      Alert.alert(
+        'Exit Analysis',
+        'Are you sure you want to exit? Your progress will be lost.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Exit', style: 'destructive', onPress: () => router.back() },
+        ]
+      );
+    } else if (currentStep === 'capture') {
+      setCurrentStep('record');
+    } else if (currentStep === 'context') {
+      setCurrentStep('capture');
+    } else if (currentStep === 'result') {
+      Alert.alert(
+        'Start Over',
+        'This will clear your results. Would you like to start a new analysis?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Start Over',
+            style: 'destructive',
+            onPress: () => {
+              setCurrentStep('record');
+              setAudioUri(null);
+              setAudioBlob(null);
+              setFaceUri(null);
+              setAnalysisResult(null);
+              setBabyAge('');
+              setFeedingTime('');
+              setSleepTime('');
+              setRoomTemperature('');
+              setRecordingDuration(0);
+            },
+          },
+        ]
+      );
+    }
+  };
+
   const getStepTitle = () => {
     switch (currentStep) {
       case 'record': return 'Record Cry';
       case 'capture': return 'Capture Face';
-      case 'context': return 'Add Context';
+      case 'context': return 'Baby Care Info';
       case 'result': return 'Analysis Result';
     }
   };
@@ -702,6 +743,17 @@ export default function SmartAnalysisScreen() {
 
   return (
     <ScrollView style={[styles.container, { backgroundColor }]} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      {/* Back Button Header */}
+      {currentStep !== 'record' && (
+        <View style={[styles.backButtonHeader, { borderBottomColor: Colors.light.border }]}>
+          <Pressable style={styles.backButtonPill} onPress={handleBack}>
+            <ThemedText style={styles.backButtonChevron}>‹</ThemedText>
+            <ThemedText style={[styles.backButtonText, { color: Colors.light.primary }]}>Back</ThemedText>
+          </Pressable>
+          <View style={{ flex: 1 }} />
+        </View>
+      )}
+
       <View style={styles.header}>
         <View style={styles.progressContainer}>
           <View style={[styles.stepIndicator, { backgroundColor: Colors.light.primary }]}>
@@ -720,6 +772,22 @@ export default function SmartAnalysisScreen() {
         {/* STEP 1: RECORD */}
         {currentStep === 'record' && (
           <View style={[styles.stepCard, { backgroundColor: cardBackground, shadowColor }]}>
+            {/* Home Exit Button for Record Step */}
+            <Pressable
+              style={styles.exitButton}
+              onPress={() => {
+                Alert.alert(
+                  'Exit',
+                  'Leave the cry analysis?',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Exit', style: 'destructive', onPress: () => router.back() },
+                  ]
+                );
+              }}
+            >
+              <ThemedText style={styles.exitButtonText}>✕</ThemedText>
+            </Pressable>
             {!audioUri && (
               <>
                 <View style={styles.iconContainer}>
@@ -896,7 +964,7 @@ export default function SmartAnalysisScreen() {
         {currentStep === 'context' && (
           <View style={[styles.stepCard, { backgroundColor: cardBackground, shadowColor }]}>
             <ThemedText style={[styles.stepDescription, { color: secondaryText }]}>
-              Add context for better accuracy (required)
+              Share a few care details to improve the result
             </ThemedText>
 
             <View style={styles.inputContainer}>
@@ -1179,6 +1247,35 @@ export default function SmartAnalysisScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: Spacing.xl },
   scrollContent: { flexGrow: 1, paddingBottom: Spacing.xl * 2 },
+  backButtonHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+  },
+  backButtonPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(93, 167, 177, 0.08)',
+  },
+  backButtonChevron: { fontSize: Typography.sizes.xl, fontWeight: Typography.weights.bold, marginRight: Spacing.xs },
+  backButtonText: { fontSize: Typography.sizes.sm, fontWeight: Typography.weights.semiBold },
+  exitButton: {
+    position: 'absolute',
+    top: Spacing.lg,
+    right: Spacing.lg,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(214, 118, 118, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exitButtonText: { color: Colors.light.danger, fontSize: Typography.sizes.lg, fontWeight: Typography.weights.bold },
   header: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xl, alignItems: 'center' },
   progressContainer: { alignItems: 'center', marginBottom: Spacing.lg },
   stepIndicator: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.sm },
